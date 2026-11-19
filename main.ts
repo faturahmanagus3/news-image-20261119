@@ -10,14 +10,38 @@
 // Run it locally with:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 // (MAKEFUN_OUTPUT_DIR stands in for the grader's /output.)
+//
+// Before anything is written, the shipped image is validated: it must
+// carry the PNG signature and stay within the contest's 1 MiB cap.
+// After the copy, the delivered file is read back and compared byte
+// for byte with the source, so a short or corrupted write fails the
+// run loudly instead of handing the grader a bad image.
 
-import { copyFileSync, statSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const MAX_IMAGE_BYTES = 1_048_576; // the contest's 1 MiB gate
+
 const here = dirname(fileURLToPath(import.meta.url));
+const sourceFile = join(here, 'entry.png');
 const targetDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const outFile = join(targetDir, 'entry.png');
 
-copyFileSync(join(here, 'entry.png'), outFile);
-console.log(`entry.png delivered: ${statSync(outFile).size} bytes`);
+const source = readFileSync(sourceFile);
+if (source.length > MAX_IMAGE_BYTES) {
+  throw new Error(`entry.png is ${source.length} bytes, over the 1 MiB cap`);
+}
+if (!source.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+  throw new Error('entry.png does not start with the PNG signature');
+}
+
+mkdirSync(targetDir, { recursive: true });
+copyFileSync(sourceFile, outFile);
+
+const delivered = readFileSync(outFile);
+if (!delivered.equals(source)) {
+  throw new Error('delivered entry.png differs from the shipped image');
+}
+console.log(`entry.png delivered: ${statSync(outFile).size} bytes (verified identical)`);
